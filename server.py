@@ -140,6 +140,57 @@ async def get_state():
     return await _build_state()
 
 
+@app.post("/api/git/pull")
+async def git_pull():
+    """Pull latest code from GitHub."""
+    import subprocess as _sp
+    try:
+        r = _sp.run(["git", "pull", "origin", "main"], capture_output=True, text=True, cwd=str(BASE_DIR), timeout=30)
+        add_log("info", "update", f"git pull: {r.stdout.strip() or r.stderr.strip()}")
+        if "Already up to date" in r.stdout or "Already up-to-date" in r.stdout:
+            return {"status": "ok", "message": "Already up to date"}
+        return {"status": "ok", "message": r.stdout.strip() or "Updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/version")
+async def check_version():
+    """Check current version and compare with latest GitHub release."""
+    import subprocess as _sp
+    info = {
+        "current_commit": "",
+        "current_short": "",
+        "latest_commit": "",
+        "latest_short": "",
+        "update_available": False,
+        "commits_behind": 0,
+    }
+    try:
+        # Get current commit
+        r = _sp.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=str(BASE_DIR), timeout=5)
+        if r.returncode == 0:
+            info["current_commit"] = r.stdout.strip()
+            info["current_short"] = info["current_commit"][:7]
+        # Get latest from remote (without pulling)
+        r2 = _sp.run(["git", "ls-remote", "origin", "HEAD"], capture_output=True, text=True, timeout=10)
+        if r2.returncode == 0 and r2.stdout.strip():
+            info["latest_commit"] = r2.stdout.split()[0]
+            info["latest_short"] = info["latest_commit"][:7]
+        if info["current_commit"] and info["latest_commit"] and info["current_commit"] != info["latest_commit"]:
+            # Count commits behind
+            r3 = _sp.run(
+                ["git", "rev-list", "--count", f"{info['current_commit']}..{info['latest_commit']}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if r3.returncode == 0:
+                info["commits_behind"] = int(r3.stdout.strip())
+            info["update_available"] = info["commits_behind"] > 0
+    except Exception:
+        pass
+    return info
+
+
 @app.post("/api/agents")
 async def register_agent(data: dict):
     """Register or update an agent."""

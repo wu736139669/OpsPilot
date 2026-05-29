@@ -157,6 +157,9 @@
   <div class="header-left">
     <div class="logo">⚡ <span>OpsPilot</span></div>
     <span><span class="dot live" id="live-dot"></span> <span id="conn-text" style="font-size:11px;color:var(--text-muted);">Connecting...</span></span>
+    <span id="update-banner" style="display:none;font-size:10px;background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:4px;cursor:pointer;" onclick="runGitPull()" title="Click to git pull">
+      ⬆ Update available · <span id="update-count"></span> commits behind
+    </span>
   </div>
   <div class="header-right">
     <span>🖥 <strong id="stat-agents">0</strong> Agents</span>
@@ -905,8 +908,33 @@ initSplitter('splitter-1', '.col-left', 160);
 // splitter-2: drag to resize col-right (min 300px)
 initSplitter('splitter-2', '.col-right', 300);
 
+// ── Version check ──
+async function checkForUpdates() {
+  try {
+    const r = await fetch('/api/version');
+    const v = await r.json();
+    if (v.update_available) {
+      document.getElementById('update-banner').style.display = 'inline';
+      document.getElementById('update-count').textContent = v.commits_behind;
+    }
+  } catch(e) {}
+}
+
+async function runGitPull() {
+  toast('Pulling latest code...');
+  try {
+    const r = await api('POST', '/api/git/pull');
+    toast(r.message || 'Updated! Please restart the server.');
+    document.getElementById('update-banner').style.display = 'none';
+  } catch(e) {
+    toast('Pull failed. Run manually: cd OpsPilot && git pull');
+  }
+}
+
 // Init
 connect();
+checkForUpdates();
+setInterval(checkForUpdates, 300000); // Check every 5 min
 setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 8000);
 setInterval(() => {
   document.getElementById('stat-time').textContent = new Date().toLocaleTimeString('zh-CN');
