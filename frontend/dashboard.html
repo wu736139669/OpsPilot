@@ -442,28 +442,27 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
     </div>
     <div class="step-list">${stepHtml}</div>
     ${activeTask.status === 'completed' ? '<div style="text-align:center;padding:16px;color:var(--green);font-size:13px;font-weight:600;">🎉 任务全部完成！</div>' : ''}
-    // Session status
-    const sessionRunning = projAgents.some(a => a.tmux?.running);
-    const claudeActive = termContent.includes('❯') && !termContent.includes('Welcome back');
-
-    let sessionHtml = '<div style="margin-top:12px;border-top:1px solid var(--border-light);padding-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
-    // Status pills
-    sessionHtml += `<span style="font-size:10px;display:flex;align-items:center;gap:4px;">`;
-    sessionHtml += `<span style="color:${sessionRunning ? '#3fb950' : '#f85149'};">●</span> tmux: ${sessionRunning ? '在线' : '离线'}`;
-    sessionHtml += `</span>`;
-    sessionHtml += `<span style="font-size:10px;display:flex;align-items:center;gap:4px;">`;
-    sessionHtml += `<span style="color:${claudeActive ? '#3fb950' : '#8b949e'};">●</span> Claude: ${claudeActive ? '运行中' : (sessionRunning ? '待检测' : '未启动')}`;
-    sessionHtml += `</span>`;
-    sessionHtml += '<span style="flex:1;"></span>';
-    // Action buttons
-    sessionHtml += `<button class="act-btn primary" onclick="showNewTaskModal()">📋 派新任务</button>`;
-    sessionHtml += `<button class="act-btn" onclick="resumeSession()">🔄 恢复</button>`;
-    sessionHtml += `<input type="text" id="resume-session-id" placeholder="Session ID (可选)" style="width:100px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:10px;font-family:monospace;">`;
-    sessionHtml += `<button class="act-btn danger" onclick="killSession()">⏹ 关闭</button>`;
-    sessionHtml += '</div>';
-
-    document.getElementById('task-detail').innerHTML += sessionHtml;
   `;
+
+  // Session status bar (append after main content)
+  const sessionRunning = projAgents.some(a => a.tmux?.running);
+  const claudeActive = termContent.includes('❯') && !termContent.includes('Welcome back');
+
+  let sessionHtml = '<div style="margin-top:12px;border-top:1px solid var(--border-light);padding-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
+  sessionHtml += '<span style="font-size:10px;display:flex;align-items:center;gap:4px;">';
+  sessionHtml += '<span style="color:' + (sessionRunning ? '#3fb950' : '#f85149') + ';">●</span> tmux: ' + (sessionRunning ? 'Online' : 'Offline');
+  sessionHtml += '</span>';
+  sessionHtml += '<span style="font-size:10px;display:flex;align-items:center;gap:4px;">';
+  sessionHtml += '<span style="color:' + (claudeActive ? '#3fb950' : '#8b949e') + ';">●</span> Claude: ' + (claudeActive ? 'Active' : (sessionRunning ? 'Idle' : 'Not started'));
+  sessionHtml += '</span>';
+  sessionHtml += '<span style="flex:1;"></span>';
+  sessionHtml += '<button class="act-btn primary" onclick="showNewTaskModal()">📋 New Task</button>';
+  sessionHtml += '<button class="act-btn" onclick="resumeSession()">🔄 Resume</button>';
+  sessionHtml += '<input type="text" id="resume-session-id" placeholder="Session ID" style="width:100px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:10px;font-family:monospace;">';
+  sessionHtml += '<button class="act-btn danger" onclick="killSession()">⏹ Kill</button>';
+  sessionHtml += '</div>';
+
+  document.getElementById('task-detail').innerHTML += sessionHtml;
 
   // Terminal
   const projAgents = (project.agents || []).map(n => agents[n]).filter(Boolean);
