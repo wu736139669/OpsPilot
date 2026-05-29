@@ -444,7 +444,14 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
     ${activeTask.status === 'completed' ? '<div style="text-align:center;padding:16px;color:var(--green);font-size:13px;font-weight:600;">🎉 任务全部完成！</div>' : ''}
   `;
 
-  // Session status bar (append after main content)
+  // Terminal + session info (declare before use)
+  const projAgents = (project.agents || []).map(n => agents[n]).filter(Boolean);
+  const sessionName = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  document.getElementById('term-label').textContent = sessionName;
+  const termContent = terminals[sessionName]?.content || 'No terminal data';
+  document.getElementById('terminal').textContent = termContent;
+
+  // Session status bar
   const sessionRunning = projAgents.some(a => a.tmux?.running);
   const claudeActive = termContent.includes('❯') && !termContent.includes('Welcome back');
 
@@ -463,13 +470,6 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
   sessionHtml += '</div>';
 
   document.getElementById('task-detail').innerHTML += sessionHtml;
-
-  // Terminal
-  const projAgents = (project.agents || []).map(n => agents[n]).filter(Boolean);
-  const sessionName = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
-  document.getElementById('term-label').textContent = sessionName;
-  const termContent = terminals[sessionName]?.content || '暂无终端数据';
-  document.getElementById('terminal').textContent = termContent;
   document.getElementById('terminal').scrollTop = document.getElementById('terminal').scrollHeight;
 
   // Show/hide confirm buttons based on prompt detection
