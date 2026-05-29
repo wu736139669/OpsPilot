@@ -100,6 +100,9 @@ def get_tmux_status(session_name: str) -> dict:
             ["tmux", "list-windows", "-t", session_name, "-F", "#{window_index}:#{window_name}:#{window_active}"],
             capture_output=True, text=True, timeout=5
         )
+        # Exit code non-zero means session doesn't exist
+        if result.returncode != 0 or "can't find session" in result.stderr.lower() or "no server running" in result.stderr.lower():
+            return {"running": False, "windows": [], "active_window": None}
         windows = []
         active_window = None
         for line in result.stdout.strip().split("\n"):
