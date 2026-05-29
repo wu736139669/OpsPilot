@@ -1,95 +1,99 @@
 # OpsPilot — AI Coding Agent Control Center
 
-> 一个给 AI 编程 Agent 用的"任务调度中心"。人类派发任务，AI Agent 领任务、拆步骤、执行、汇报，全程可视化。
+> A task orchestration center for AI coding agents. Humans assign tasks, AI agents break them into steps, execute, and report progress — all visualized in real time.
 
-## 一键启动
+## Quick Start
 
 ```bash
 pip3 install fastapi uvicorn websockets
 python3 server.py
-# 打开 http://localhost:5016
+# Open http://localhost:5016
 ```
 
-端口默认 5016，可通过 `OPSPILOT_PORT` 环境变量修改。
+Default port is 5016, configurable via `OPSPILOT_PORT` environment variable.
 
-## 概念模型
+## Concept Model
 
 ```
-人类(你)                OpsPilot(控制中心)           Claude Code(tmux里)
-  │                         │                           │
-  ├─ 新建项目+派发任务 ──→  │                           │
-  │                         ├─ 创建 tmux session ────→  │
-  │                         ├─ 发送任务指令 ──────────→  │
-  │                         │                           ├─ 拆步骤
-  │                         │                           ├─ 写代码
-  │                         │                           ├─ 弹确认框
-  │                         │  ← 检测到确认弹窗 ──────── │
-  │  ← 显示确认按钮 ─────── │                           │
-  ├─ 点击确认 ────────────→ │  ──→ 发送确认 ──────────→  │
-  │                         │                           ├─ 继续执行
-  │                         │  ← 步骤完成通知 ────────── │
-  │  ← 步骤进度更新 ─────── │                           │
-  │                         │                           ├─ 全部完成
+Human (You)              OpsPilot (Control Center)        Claude Code (in tmux)
+  │                           │                                │
+  ├─ Create project+task ───→ │                                │
+  │                           ├─ Create tmux session ────────→ │
+  │                           ├─ Send task instructions ─────→ │
+  │                           │                                ├─ Break into steps
+  │                           │                                ├─ Write code
+  │                           │                                ├─ Pop up confirmation
+  │                           │  ← Detect confirmation ──────  │
+  │  ← Show confirm button ── │                                │
+  ├─ Click confirm ─────────→ │ ──→ Send confirmation ───────→ │
+  │                           │                                ├─ Continue
+  │                           │  ← Step completion notice ───  │
+  │  ← Step progress update ─ │                                │
+  │                           │                                ├─ All done
 ```
 
-## 给 AI Agent 的启动说明
+## For AI Agents
 
-如果你是一个 AI Coding Agent（比如 Claude Code），进入这个项目后：
+If you are an AI Coding Agent (e.g., Claude Code) entering this project:
 
-1. 阅读本文件了解项目结构
-2. `python3 server.py` 启动控制中心
-3. 控制中心提供 Web 仪表盘 + REST API + WebSocket
-4. 通过 `/api/tmux/session` 创建新的 tmux 会话并启动另一个 Claude Code 实例
-5. 通过 `/api/tmux/send` 向 tmux 中的 Agent 发送指令
-6. 通过 `/api/tmux/capture` 捕获 Agent 的输出
-7. 通过 `/api/tasks` 管理任务和步骤进度
+1. Read this file to understand the project structure
+2. Run `python3 server.py` to start the control center
+3. The control center provides a Web dashboard + REST API + WebSocket
+4. Use `/api/tmux/session` to create tmux sessions and launch separate Claude Code instances
+5. Use `/api/tmux/send` to send commands to agents in tmux
+6. Use `/api/tmux/capture` to capture agent output
+7. Use `/api/tasks` to manage tasks and step progress
 
-## 项目结构
+## Project Structure
 
 ```
 OpsPilot/
-├── server.py              # FastAPI 主程序 (仪表盘 + API + WebSocket)
+├── server.py              # FastAPI main (dashboard + API + WebSocket)
 ├── frontend/
-│   └── dashboard.html     # 单页 Web 仪表盘
-├── config.json             # 用户配置 (可选，自动生成)
-├── start.sh               # 启动脚本
-├── state/                 # 运行时状态 (自动生成)
-│   ├── agents.json        # Agent 注册表
-│   ├── projects.json      # 项目注册表
-│   └── tasks.json         # 任务和步骤
-├── logs/                  # 事件日志
-└── CLAUDE.md              # 本文件
+│   └── dashboard.html     # Single-page web dashboard
+├── start.sh               # Startup script
+├── state/                 # Runtime state (auto-generated)
+│   ├── agents.json        # Agent registry
+│   ├── projects.json      # Project registry
+│   └── tasks.json         # Tasks and steps
+├── logs/                  # Event logs
+├── CLAUDE.md              # This file
+└── README.md
 ```
 
-## 核心 API
+## Core API
 
-| 端点 | 方法 | 用途 |
-|------|------|------|
-| `/` | GET | Web 仪表盘 |
-| `/ws` | WS | 实时状态推送 (每 10s) |
-| `/api/state` | GET | 当前完整状态 |
-| `/api/projects` | POST | 注册/更新项目 |
-| `/api/agents` | POST | 注册/更新 Agent |
-| `/api/tasks` | POST | 创建任务 (含步骤列表) |
-| `/api/tasks/{id}/start` | POST | 启动任务 |
-| `/api/tasks/{id}/steps/{n}/complete` | POST | 完成一个步骤 |
-| `/api/tmux/session` | POST | 创建 tmux 会话 + 启动 Claude Code |
-| `/api/tmux/send` | POST | 向 tmux 会话发送按键 |
-| `/api/tmux/confirm` | POST | 发送确认 (yes/no/enter/escape) |
-| `/api/tmux/capture` | POST | 捕获 tmux 窗格内容 |
-| `/api/tmux/live/{session}` | GET | 获取实时终端内容 |
-| `/api/fs/list` | GET | 浏览目录 (路径选择器) |
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | Web dashboard |
+| `/ws` | WS | Real-time state push (every 10s) |
+| `/api/state` | GET | Full current state |
+| `/api/projects` | POST | Register/update project |
+| `/api/agents` | POST | Register/update agent |
+| `/api/tasks` | POST | Create task (with step list) |
+| `/api/tasks/{id}/start` | POST | Start a task |
+| `/api/tasks/{id}/steps/{n}/complete` | POST | Complete a step |
+| `/api/tmux/session` | POST | Create tmux session + launch Claude Code |
+| `/api/tmux/send` | POST | Send keystrokes to tmux session |
+| `/api/tmux/confirm` | POST | Send confirmation (yes/no/enter/escape) |
+| `/api/tmux/capture` | POST | Capture tmux pane content |
+| `/api/tmux/kill` | POST | Kill a tmux session |
+| `/api/tmux/resume` | POST | Resume or re-create a tmux session |
+| `/api/tmux/window` | POST | Create new window in a session |
+| `/api/tmux/live/{session}` | GET | Get live terminal content |
+| `/api/claude/sessions` | GET | List Claude Code sessions for a project |
+| `/api/fs/list` | GET | Browse directories (path picker) |
 
-## 如何让 AI Agent 管理多个项目
+## Managing Multiple Projects
 
-1. 在仪表盘点 "+ New" 或调用 `/api/projects` 创建项目
-2. 系统自动创建对应的 tmux session 并在其中启动 Claude Code
-3. 通过仪表盘的终端面板或 API 向特定项目的 Agent 发送指令
-4. 每个项目独立运行，互不干扰
-5. 仪表盘左侧显示所有项目，点击切换查看
+1. Click "+ New" in the dashboard or call `/api/projects` to create a project
+2. The system auto-creates a tmux session and launches Claude Code
+3. Send commands to specific project agents via the terminal panel or API
+4. Each project runs independently without interference
+5. The dashboard left sidebar shows all projects — click to switch
 
-## 配置
+## Configuration
 
-可选的环境变量：
-- `OPSPILOT_PORT`: Web 服务端口 (默认 5016)
-- `OPSPILOT_PROJECTS_DIR`: 项目默认存放目录 (默认 ~/Documents/Projects)
+Optional environment variables:
+- `OPSPILOT_PORT`: Web server port (default: 5016)
+- `OPSPILOT_PROJECTS_DIR`: Default project directory (default: ~/Documents/Projects)

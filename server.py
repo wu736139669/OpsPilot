@@ -137,19 +137,7 @@ async def dashboard():
 
 @app.get("/api/state")
 async def get_state():
-    agents = load_agents()
-    projects = load_projects()
-    # Merge live tmux status
-    for name, agent in agents.items():
-        session = agent.get("tmux_session", "")
-        if session:
-            agent["tmux"] = get_tmux_status(session)
-    return {
-        "agents": agents,
-        "projects": projects,
-        "logs": log_buffer[-100:],
-        "time": datetime.now().isoformat(),
-    }
+    return await _build_state()
 
 
 @app.post("/api/agents")
@@ -354,6 +342,120 @@ async def update_task_status(task_id: str, data: dict):
 
 # ── Tmux Control ──────────────────────────────────
 
+@app.post("/api/tmux/kill")
+async def kill_tmux_session(data: dict):
+    """Kill a tmux session."""
+    session = data.get("session", "")
+    if not session:
+        raise HTTPException(status_code=400, detail="session required")
+    try:
+        subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True, text=True, timeout=5)
+        add_log("info", "tmux", f"Session killed: {session}")
+        # Update agent status
+        agents = load_agents()
+        for name, a in agents.items():
+            if a.get("tmux_session") == session:
+                a["status"] = "stopped"
+        save_agents(agents)
+        await broadcast(await _build_state())
+        return {"status": "ok", "session": session}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tmux/window")
+async def create_tmux_window(data: dict):
+    """Create a new window in an existing tmux session."""
+    session = data.get("session", "")
+    window_name = data.get("window_name", "dev2")
+    cwd = data.get("cwd", "")
+    if not session:
+        raise HTTPException(status_code=400, detail="session required")
+    try:
+        cmd = ["tmux", "new-window", "-t", session, "-n", window_name]
+        if cwd:
+            cmd += ["-c", cwd]
+        subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        add_log("info", "tmux", f"New window {window_name} in session {session}")
+        return {"status": "ok", "session": session, "window": window_name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tmux/resume")
+async def resume_tmux_session(data: dict):
+    """Resume or create a tmux session. If it exists, return status. If not, re-create it."""
+    session = data.get("session", "")
+    project_dir = data.get("project_dir", "")
+    if not session:
+        raise HTTPException(status_code=400, detail="session required")
+
+    # Ensure project dir exists
+    if project_dir:
+        os.makedirs(project_dir, exist_ok=True)
+
+    status = get_tmux_status(session)
+    if status["running"]:
+        return {"status": "already_running", "session": session, "tmux": status}
+
+    # Re-create the session
+    try:
+        subprocess.run(
+            ["tmux", "new-session", "-d", "-s", session, "-n", "dev", "-c", project_dir or str(BASE_DIR)],
+            capture_output=True, text=True, timeout=5
+        )
+        time.sleep(1)
+
+        # Auto-start Claude Code with resume
+        resume_id = data.get("resume_id", "")
+        if resume_id:
+            claude_cmd = f"claude --resume {resume_id}"
+        else:
+            claude_cmd = "claude --resume"
+
+        subprocess.run(
+            ["tmux", "send-keys", "-t", f"{session}:dev", claude_cmd, "Enter"],
+            capture_output=True, text=True, timeout=5
+        )
+
+        add_log("info", "tmux", f"Session {session} resumed, Claude Code starting with --resume")
+        return {"status": "resumed", "session": session, "tmux": get_tmux_status(session)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claude/sessions")
+async def list_claude_sessions(project_dir: str = ""):
+    """List Claude Code sessions, optionally filtered by project directory."""
+    import glob as _glob
+    sessions_dir = os.path.expanduser("~/.claude/sessions")
+    sessions = []
+    try:
+        for f in sorted(_glob.glob(os.path.join(sessions_dir, "*.json")), reverse=True):
+            try:
+                data = json.loads(Path(f).read_text())
+                sid = data.get("sessionId", "")
+                cwd = data.get("cwd", "")
+                status = data.get("status", "unknown")
+                started = data.get("startedAt", "")
+                updated = data.get("updatedAt", "")
+                # Filter by project dir if specified
+                if project_dir and project_dir not in cwd:
+                    continue
+                sessions.append({
+                    "id": sid,
+                    "cwd": cwd,
+                    "status": status,
+                    "started_at": started,
+                    "updated_at": updated,
+                })
+            except Exception:
+                pass
+        return {"sessions": sessions, "total": len(sessions)}
+    except Exception as e:
+        return {"sessions": [], "error": str(e)}
+
+
 @app.get("/api/fs/list")
 async def list_directory(path: str = ""):
     """List subdirectories for the path picker."""
@@ -408,6 +510,10 @@ async def create_tmux_session(data: dict):
         return {"status": "exists", "session": session_name, "tmux": existing}
 
     try:
+        # Ensure project directory exists
+        if project_dir:
+            os.makedirs(project_dir, exist_ok=True)
+
         # Create detached session
         subprocess.run(
             ["tmux", "new-session", "-d", "-s", session_name, "-n", "dev", "-c", project_dir or str(BASE_DIR)],
@@ -569,14 +675,102 @@ async def startup():
     asyncio.create_task(_periodic_broadcast())
 
 
+# ── Auto-detection of Claude Code progress ──────────
+
+# Track which completions we've already processed to avoid double-counting
+_seen_completions: set = set()
+
+
+async def _auto_detect_progress():
+    """Scan tmux output for Claude Code task completion patterns and auto-update steps."""
+    tasks = load_tasks()
+    agents = load_agents()
+    changed = False
+
+    for tid, task in tasks.items():
+        if task.get("status") != "running":
+            continue
+
+        project_name = task.get("project", "")
+        # Find the tmux session for this project's agent
+        proj_agents = [a for a in agents.values() if a.get("project") == project_name]
+        if not proj_agents:
+            continue
+        session = proj_agents[0].get("tmux_session", "")
+        if not session:
+            continue
+
+        # Capture terminal output
+        cap = _capture_tmux(session, "0", 100)
+        content = cap.get("content", "")
+
+        # Pattern: ✔ <step_name>  (Claude Code completion checkmark)
+        import re as _re
+        completed_items = _re.findall(r'✔\s+(.+?)(?:\n|$)', content)
+
+        steps = task.get("steps", [])
+        for step_idx, step in enumerate(steps):
+            if step.get("status") not in ("running", "pending"):
+                continue
+
+            step_name = step.get("name", "")
+            for item in completed_items:
+                # Fuzzy match: check if the completed item contains step name keywords
+                item_lower = item.lower().strip()
+                step_lower = step_name.lower().strip()
+
+                # Try direct match or keyword match
+                match = (
+                    step_lower in item_lower or
+                    item_lower in step_lower or
+                    any(kw in item_lower for kw in step_lower.split() if len(kw) > 2)
+                )
+
+                if match:
+                    dedup_key = f"{tid}:{step_idx}:{item}"
+                    if dedup_key in _seen_completions:
+                        continue
+                    _seen_completions.add(dedup_key)
+
+                    # Auto-complete this step
+                    now = datetime.now().isoformat()
+                    step["status"] = "completed"
+                    step["completed_at"] = now
+                    if step.get("started_at"):
+                        try:
+                            start = datetime.fromisoformat(step["started_at"])
+                            step["duration_seconds"] = int((datetime.now() - start).total_seconds())
+                        except Exception:
+                            pass
+
+                    # Start next step
+                    next_idx = step_idx + 1
+                    if next_idx < len(steps):
+                        steps[next_idx]["status"] = "running"
+                        steps[next_idx]["started_at"] = now
+                        task["current_step"] = next_idx
+                    else:
+                        task["status"] = "completed"
+                        task["completed_at"] = now
+                        task["current_step"] = len(steps)
+
+                    add_log("info", "auto-detect", f"{project_name}: step {step_idx+1}/{len(steps)} '{step_name}' → completed (auto)")
+                    changed = True
+                    break
+
+    if changed:
+        save_tasks(tasks)
+
+
 async def _periodic_broadcast():
     while True:
         await asyncio.sleep(10)
-        if ws_clients:
-            try:
+        try:
+            await _auto_detect_progress()
+            if ws_clients:
                 await broadcast(await _build_state())
-            except Exception:
-                pass
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

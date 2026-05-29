@@ -33,10 +33,24 @@
   .header-right { display: flex; align-items: center; gap: 16px; font-size: 11px; color: var(--text-secondary); }
   .header-right strong { color: var(--text); }
 
-  /* Main 3-column layout */
-  .main { display: grid; grid-template-columns: 240px 1fr 380px; flex: 1; overflow: hidden; }
-  .col { display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
-  .col:last-child { border-right: none; }
+  /* Main 3-column layout with resizable panels */
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .col { display: flex; flex-direction: column; overflow: hidden; }
+  .col-left { width: 240px; flex-shrink: 0; }
+  .col-center { flex: 1; min-width: 200px; }
+  .col-right { width: 420px; min-width: 300px; flex-shrink: 0; }
+
+  /* Draggable splitter */
+  .splitter {
+    width: 5px; background: var(--border); cursor: col-resize; flex-shrink: 0;
+    position: relative; transition: background 0.15s;
+  }
+  .splitter:hover, .splitter.dragging { background: var(--accent); }
+  .splitter::after {
+    content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 3px; height: 24px; border-radius: 2px; background: transparent; transition: background 0.15s;
+  }
+  .splitter:hover::after, .splitter.dragging::after { background: rgba(255,255,255,0.6); }
   .col-header { padding: 12px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); border-bottom: 1px solid var(--border-light); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
   .col-body { flex: 1; overflow-y: auto; padding: 8px; }
 
@@ -154,7 +168,7 @@
 
 <div class="main">
   <!-- LEFT: Projects -->
-  <div class="col">
+  <div class="col col-left">
     <div class="col-header">
       📁 Projects
       <button class="act-btn" style="font-size:10px;padding:3px 8px;" onclick="showNewProject()">+ New</button>
@@ -164,8 +178,10 @@
     </div>
   </div>
 
+  <div class="splitter" id="splitter-1"></div>
+
   <!-- CENTER: Task Steps -->
-  <div class="col">
+  <div class="col col-center">
     <div class="col-header">
       📋 Task Progress
       <div style="display:flex;align-items:center;gap:8px;">
@@ -181,8 +197,10 @@
     </div>
   </div>
 
+  <div class="splitter" id="splitter-2"></div>
+
   <!-- RIGHT: Terminal + Controls -->
-  <div class="col">
+  <div class="col col-right">
     <div class="col-header">
       🖥 Terminal & Controls
       <span style="font-size:10px;font-weight:400;color:var(--text-muted);" id="term-label"></span>
@@ -193,15 +211,32 @@
       <div class="action-row" id="action-bar">
         <button class="act-btn" onclick="confirmAgent('escape')">Esc</button>
         <button class="act-btn" onclick="confirmAgent('enter')">↵ 回车</button>
-        <button class="act-btn" onclick="confirmAgent('yes')">✅ 确认(1)</button>
-        <button class="act-btn" onclick="confirmAgent('yes_allow_all')">🔓 全部允许(2)</button>
         <button class="act-btn" onclick="refreshTerminal()">↻ 刷新终端</button>
+        <span id="confirm-btns" style="display:none;display:flex;gap:6px;">
+          <button class="act-btn" onclick="confirmAgent('yes')" style="background:var(--green);color:#fff;border-color:var(--green);">✅ 确认(1)</button>
+          <button class="act-btn" onclick="confirmAgent('yes_allow_all')" style="background:var(--purple);color:#fff;border-color:var(--purple);">🔓 全部允许(2)</button>
+        </span>
       </div>
       <div class="task-input-row">
         <input type="text" id="agent-prompt" placeholder="输入指令发送给 Claude Code..."
                onkeydown="if(event.key==='Enter')sendPrompt()">
         <button class="act-btn primary" onclick="sendPrompt()">发送</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- New Task Modal -->
+<div id="task-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:200;align-items:center;justify-content:center;" onclick="if(event.target===this)closeTaskModal()">
+  <div style="background:var(--bg-card);border-radius:12px;padding:24px;width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.15);">
+    <h3 style="font-size:16px;margin-bottom:12px;" id="task-modal-title">派发新任务</h3>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:11px;color:var(--text-muted);">任务描述（Claude Code 会自动拆分为步骤执行）</label>
+      <textarea id="new-task-desc-input" rows="4" placeholder="例如：在现有项目里加一个用户登录功能，支持邮箱和密码注册..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:inherit;margin-top:4px;resize:vertical;"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="act-btn" onclick="closeTaskModal()">取消</button>
+      <button class="act-btn primary" onclick="submitNewTask()">派发任务</button>
     </div>
   </div>
 </div>
@@ -215,10 +250,17 @@
       <input type="text" id="new-proj-name" placeholder="例如：Odineye" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:inherit;margin-top:4px;">
     </div>
     <div style="margin-bottom:10px;">
-      <label style="font-size:11px;color:var(--text-muted);">项目路径 <span style="color:var(--accent);cursor:pointer;float:right;" onclick="browsePath('')">📂 浏览...</span></label>
+      <label style="font-size:11px;color:var(--text-muted);">项目路径
+        <span style="color:var(--accent);cursor:pointer;float:right;" onclick="browsePath('')">📂 浏览目录</span>
+      </label>
       <div id="path-breadcrumb" style="font-size:10px;color:var(--text-muted);margin:4px 0;min-height:16px;"></div>
-      <input type="text" id="new-proj-path" placeholder="选择或输入路径..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;margin-top:2px;">
-      <div id="path-picker" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;display:none;background:var(--bg-card);"></div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input type="text" id="new-proj-path" placeholder="选择或输入路径..." style="flex:1;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;">
+        <label style="font-size:10px;color:var(--text-muted);white-space:nowrap;display:flex;align-items:center;gap:3px;cursor:pointer;">
+          <input type="checkbox" id="use-existing-dir" onchange="onExistingDirToggle()"> 使用此目录
+        </label>
+      </div>
+      <div id="path-picker" style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;display:none;background:var(--bg-card);"></div>
     </div>
     <div style="margin-bottom:16px;">
       <label style="font-size:11px;color:var(--text-muted);">任务描述（Claude Code 会自动拆分为步骤）</label>
@@ -304,8 +346,13 @@ function renderProjects(projects, agents, tasks) {
     // Override if needs user confirmation
     if (needingAttention.has(name)) { tagClass = 'tag-warning'; tagText = '⚠ 需确认'; }
     const isActive = name === selectedProject;
+    // Session status indicator
+    const projAgents2 = (p.agents || []).map(n => (state.agents||{})[n]).filter(Boolean);
+    const tmuxRunning = projAgents2.some(a => a.tmux?.running);
+    const sessionDot = tmuxRunning ? '<span style="color:#3fb950;" title="tmux 在线">●</span>' : '<span style="color:#f85149;" title="tmux 离线">●</span>';
+
     return `<div class="project-item ${isActive ? 'active' : ''} ${needingAttention.has(name) && !isActive ? 'needs-attention' : ''}" onclick="selectProject('${escapeHtml(name)}')">
-      <div class="pname">📂 ${escapeHtml(name)} <span class="status-tag ${tagClass}">${tagText}</span></div>
+      <div class="pname">${sessionDot} ${escapeHtml(name)} <span class="status-tag ${tagClass}">${tagText}</span></div>
       <div class="ptask">${task ? escapeHtml(task.title) : '暂无任务'}</div>
       <div class="pmeta">🤖 ${(p.agents||[]).length} agents · ${p.path ? '📁' : ''}</div>
     </div>`;
@@ -388,7 +435,28 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
       </div>
     </div>
     <div class="step-list">${stepHtml}</div>
-    ${activeTask.status === 'completed' ? '<div style="text-align:center;padding:16px;color:var(--green);font-size:13px;font-weight:600;">🎉 任务全部完成！请派发新任务。</div>' : ''}
+    ${activeTask.status === 'completed' ? '<div style="text-align:center;padding:16px;color:var(--green);font-size:13px;font-weight:600;">🎉 任务全部完成！</div>' : ''}
+    // Session status
+    const sessionRunning = projAgents.some(a => a.tmux?.running);
+    const claudeActive = termContent.includes('❯') && !termContent.includes('Welcome back');
+
+    let sessionHtml = '<div style="margin-top:12px;border-top:1px solid var(--border-light);padding-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">';
+    // Status pills
+    sessionHtml += `<span style="font-size:10px;display:flex;align-items:center;gap:4px;">`;
+    sessionHtml += `<span style="color:${sessionRunning ? '#3fb950' : '#f85149'};">●</span> tmux: ${sessionRunning ? '在线' : '离线'}`;
+    sessionHtml += `</span>`;
+    sessionHtml += `<span style="font-size:10px;display:flex;align-items:center;gap:4px;">`;
+    sessionHtml += `<span style="color:${claudeActive ? '#3fb950' : '#8b949e'};">●</span> Claude: ${claudeActive ? '运行中' : (sessionRunning ? '待检测' : '未启动')}`;
+    sessionHtml += `</span>`;
+    sessionHtml += '<span style="flex:1;"></span>';
+    // Action buttons
+    sessionHtml += `<button class="act-btn primary" onclick="showNewTaskModal()">📋 派新任务</button>`;
+    sessionHtml += `<button class="act-btn" onclick="resumeSession()">🔄 恢复</button>`;
+    sessionHtml += `<input type="text" id="resume-session-id" placeholder="Session ID (可选)" style="width:100px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:10px;font-family:monospace;">`;
+    sessionHtml += `<button class="act-btn danger" onclick="killSession()">⏹ 关闭</button>`;
+    sessionHtml += '</div>';
+
+    document.getElementById('task-detail').innerHTML += sessionHtml;
   `;
 
   // Terminal
@@ -399,8 +467,12 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
   document.getElementById('terminal').textContent = termContent;
   document.getElementById('terminal').scrollTop = document.getElementById('terminal').scrollHeight;
 
-  // Prompt detection
+  // Show/hide confirm buttons based on prompt detection
+  const confirmBtns = document.getElementById('confirm-btns');
   const promptInfo = detectPrompt(termContent);
+  if (confirmBtns) confirmBtns.style.display = promptInfo ? 'flex' : 'none';
+
+  // Prompt detection
   const promptArea = document.getElementById('prompt-area');
   if (promptInfo) {
     const hasAllowAll = termContent.includes('allow all edits') || termContent.includes('shift+tab');
@@ -443,12 +515,14 @@ function deselectProject() {
   document.getElementById('task-badge').textContent = '';
   document.getElementById('terminal').textContent = '选择项目后显示终端输出...';
   document.getElementById('prompt-area').innerHTML = '';
+  document.getElementById('confirm-btns').style.display = 'none';
   renderProjects(state.projects||{}, state.agents||{}, state.tasks||{});
 }
 
 function showNewProject() {
   document.getElementById('modal-overlay').style.display = 'flex';
   document.getElementById('new-proj-name').focus();
+  document.getElementById('use-existing-dir').checked = false;
   // Default path
   const defaultPath = '/Users/wusumac/Documents/Projects';
   document.getElementById('new-proj-path').value = defaultPath;
@@ -483,18 +557,41 @@ async function browsePath(dirPath) {
   // Folder list
   const picker = document.getElementById('path-picker');
   picker.style.display = 'block';
-  if (d.dirs.length === 0) {
-    picker.innerHTML = '<div style="padding:8px;font-size:11px;color:var(--text-muted);text-align:center;">此目录下没有子文件夹</div>';
+  let html = '';
+  // Parent directory ".." entry (only if not at root)
+  if (d.path !== '/' && d.parent) {
+    html += `<div style="padding:6px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border-light);color:var(--accent);font-weight:500;"
+             onclick="browsePath('${escapeHtml(d.parent)}')"
+             onmouseover="this.style.background='var(--accent-light)'"
+             onmouseout="this.style.background=''">
+      📂 ..
+    </div>`;
+  }
+  if (d.dirs.length === 0 && !html) {
+    html += '<div style="padding:8px;font-size:11px;color:var(--text-muted);text-align:center;">此目录下没有子文件夹</div>';
   } else {
-    picker.innerHTML = d.dirs.map(dir => `
+    html += d.dirs.map(dir => `
       <div style="padding:6px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border-light);"
-           onclick="browsePath('${escapeHtml(dir.path)}')"
+           ondblclick="browsePath('${escapeHtml(dir.path)}')"
+           onclick="selectDir('${escapeHtml(dir.path)}', '${escapeHtml(dir.name)}')"
            onmouseover="this.style.background='var(--bg-hover)'"
            onmouseout="this.style.background=''">
         📁 ${escapeHtml(dir.name)}
       </div>
     `).join('');
   }
+  picker.innerHTML = html;
+}
+
+function selectDir(path, name) {
+  document.getElementById('new-proj-path').value = path;
+  document.getElementById('new-proj-name').value = name;
+  document.getElementById('use-existing-dir').checked = true;
+  browsePath(path);
+}
+
+function onExistingDirToggle() {
+  // Visual feedback only - logic handled in createProjectAndTask
 }
 
 async function createProjectAndTask() {
@@ -503,9 +600,10 @@ async function createProjectAndTask() {
   const desc = document.getElementById('new-task-desc').value.trim();
   if (!name) return;
 
-  // Auto-append project name to selected path
+  // Auto-append project name unless "use existing" is checked
+  const useExisting = document.getElementById('use-existing-dir').checked;
   const baseDir = path || '/Users/wusumac/Documents/Projects';
-  const projectDir = baseDir.endsWith(name) ? baseDir : `${baseDir}/${name}`;
+  const projectDir = useExisting ? baseDir : (baseDir.endsWith(name) ? baseDir : `${baseDir}/${name}`);
   document.getElementById('new-proj-path').value = projectDir;
 
   // Create project
@@ -633,6 +731,176 @@ function toast(msg) {
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2500);
 }
+
+// ── Session & Task management ──
+
+function showNewTaskModal() {
+  if (!selectedProject) return;
+  document.getElementById('task-modal-title').textContent = '派发新任务 → ' + selectedProject;
+  document.getElementById('task-modal-overlay').style.display = 'flex';
+  document.getElementById('new-task-desc-input').focus();
+}
+
+function closeTaskModal() {
+  document.getElementById('task-modal-overlay').style.display = 'none';
+}
+
+async function submitNewTask() {
+  const desc = document.getElementById('new-task-desc-input').value.trim();
+  if (!desc || !selectedProject) return;
+
+  const project = state.projects?.[selectedProject];
+  const agents = state.agents || {};
+  const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
+  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+
+  const stepNames = extractStepsFromDescription(desc);
+  const r = await api('POST', '/api/tasks', { project: selectedProject, title: desc, description: desc, steps: stepNames });
+  const taskId = r.task?.id;
+
+  await api('POST', '/api/tmux/send', { session, window: '0', keys: desc });
+  if (projAgents[0]) {
+    await api('POST', `/api/agents/${projAgents[0].name}/status`, { status: 'running', task: desc });
+  }
+  if (taskId) {
+    setTimeout(async () => { await api('POST', `/api/tasks/${taskId}/start`); if (ws) ws.send('ping'); }, 1000);
+  }
+
+  closeTaskModal();
+  document.getElementById('new-task-desc-input').value = '';
+  toast(`新任务已派发给 ${selectedProject}`);
+  if (ws) ws.send('ping');
+}
+
+async function resumeSession() {
+  if (!selectedProject) return;
+  const project = state.projects?.[selectedProject];
+  const agents = state.agents || {};
+  const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
+  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const path = project?.path || '';
+  const resumeId = document.getElementById('resume-session-id')?.value?.trim() || '';
+
+  // Fetch available sessions and show picker
+  const r = await fetch(`/api/claude/sessions?project_dir=${encodeURIComponent(path)}`);
+  const data = await r.json();
+  const sessions = data.sessions || [];
+
+  if (resumeId) {
+    // Specific ID provided
+    const resp = await api('POST', '/api/tmux/resume', { session, project_dir: path, resume_id: resumeId });
+    toast(`已恢复会话 ${resumeId}`);
+    setTimeout(refreshTerminal, 2000);
+  } else if (sessions.length > 0) {
+    // Show session picker in the terminal bar
+    showSessionPicker(sessions, session, path);
+  } else {
+    // No sessions, just start fresh
+    const resp = await api('POST', '/api/tmux/resume', { session, project_dir: path, resume_id: '' });
+    toast('无历史会话，启动新 Claude Code');
+    setTimeout(refreshTerminal, 2000);
+  }
+  if (ws) ws.send('ping');
+}
+
+function showSessionPicker(sessions, sessionName, projectPath) {
+  const pickerHtml = `
+    <div class="prompt-bar" style="background:#eef1fd;border-color:var(--accent);">
+      <div class="prompt-question" style="color:var(--accent);">选择要恢复的 Claude Code 会话：</div>
+      <div style="max-height:180px;overflow-y:auto;margin-bottom:8px;">
+        ${sessions.slice(0, 10).map(s => `
+          <div style="padding:6px 10px;cursor:pointer;font-size:11px;border-bottom:1px solid #e2e6ed;display:flex;justify-content:space-between;align-items:center;"
+               onclick="selectSession('${s.id}')"
+               onmouseover="this.style.background='#fff'"
+               onmouseout="this.style.background=''">
+            <span style="font-family:monospace;color:var(--accent);">${s.id.substring(0,12)}...</span>
+            <span style="font-size:10px;color:var(--text-muted);">${s.status} · ${s.updated_at ? new Date(s.updated_at).toLocaleString('zh-CN') : ''}</span>
+          </div>
+        `).join('')}
+      </div>
+      <button class="prompt-btn" style="background:var(--accent);color:#fff;border:none;" onclick="document.getElementById('prompt-area').innerHTML='';selectSession('')">启动新会话</button>
+      <button class="prompt-btn pbtn-esc" onclick="document.getElementById('prompt-area').innerHTML='';">取消</button>
+    </div>
+  `;
+  document.getElementById('prompt-area').innerHTML = pickerHtml;
+}
+
+async function selectSession(sessionId) {
+  if (!selectedProject) return;
+  const project = state.projects?.[selectedProject];
+  const agents = state.agents || {};
+  const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
+  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const path = project?.path || '';
+
+  document.getElementById('prompt-area').innerHTML = '';
+  if (sessionId) {
+    document.getElementById('resume-session-id').value = sessionId;
+  }
+  await api('POST', '/api/tmux/resume', { session, project_dir: path, resume_id: sessionId });
+  toast(sessionId ? `恢复会话 ${sessionId.substring(0,12)}...` : '启动新会话');
+  setTimeout(refreshTerminal, 2000);
+  if (ws) ws.send('ping');
+}
+
+async function killSession() {
+  if (!selectedProject) return;
+  if (!confirm('确定要关闭此项目的 tmux 会话吗？任务进度会保留。')) return;
+
+  const project = state.projects?.[selectedProject];
+  const agents = state.agents || {};
+  const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
+  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+
+  await api('POST', '/api/tmux/kill', { session });
+  toast(`会话 ${session} 已关闭`);
+  if (ws) ws.send('ping');
+}
+
+// ── Splitter drag-to-resize ──
+function initSplitter(splitterId, targetSelector, minWidth) {
+  const splitter = document.getElementById(splitterId);
+  if (!splitter) return;
+  let dragging = false, startX, startWidth;
+
+  splitter.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startX = e.clientX;
+    const target = document.querySelector(targetSelector);
+    startWidth = target ? target.offsetWidth : 300;
+    splitter.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = startX - e.clientX;
+    const target = document.querySelector(targetSelector);
+    if (!target) return;
+    // For left-column targets, reverse the drag direction
+    if (targetSelector === '.col-left') {
+      const newWidth = Math.max(minWidth, startWidth - dx);
+      target.style.width = newWidth + 'px';
+    } else {
+      const newWidth = Math.max(minWidth, startWidth + dx);
+      target.style.width = newWidth + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    splitter.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+}
+
+// splitter-1: drag to resize col-left (min 160px)
+initSplitter('splitter-1', '.col-left', 160);
+// splitter-2: drag to resize col-right (min 300px)
+initSplitter('splitter-2', '.col-right', 300);
 
 // Init
 connect();

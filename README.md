@@ -1,99 +1,109 @@
 # OpsPilot — AI Coding Agent Control Center
 
-一个**给 AI 编程 Agent 用的任务调度中心**。人类派发开发任务，AI Agent 自动拆步骤、执行、汇报，全程可视化。
+A **task orchestration center for AI coding agents**. Assign development tasks, let AI agents break them into steps, execute, and report progress — all visualized in a web dashboard.
 
-## 为什么需要 OpsPilot？
+## Why OpsPilot?
 
-如果你在用 Claude Code / Cursor / Codex 等 AI 编程工具管理多个项目，你会遇到这些问题：
+If you use Claude Code, Cursor, Codex, or other AI coding tools across multiple projects, you face these problems:
 
-- 每个项目要手动开 tmux、手动启动 AI Agent
-- AI Agent 执行到一半弹确认框，你得切到对应终端去点
-- 多个项目并行开发，不知道各自进度
-- 任务步骤不透明，不知道 Agent 在做什么
+- Manually opening tmux sessions and launching AI agents for each project
+- Switching terminals to approve confirmation prompts mid-execution
+- No visibility into which project is doing what
+- Opaque task progress — you don't know what step the agent is on
 
-OpsPilot 解决的就是这些——一个 Web 控制台，同时管理多个 AI 编程 Agent。
+OpsPilot solves all of this with a single web console for managing multiple AI coding agents simultaneously.
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 1. 克隆
-git clone <repo-url> OpsPilot
+# 1. Clone
+git clone https://github.com/wu736139669/OpsPilot.git
 cd OpsPilot
 
-# 2. 安装依赖 (只需要 FastAPI)
+# 2. Install dependencies (only FastAPI needed)
 pip3 install fastapi uvicorn websockets
 
-# 3. 启动
+# 3. Start
 python3 server.py
 
-# 4. 打开浏览器
+# 4. Open browser
 open http://localhost:5016
 ```
 
-> 前置要求：Python 3.9+、tmux、Claude Code CLI (`claude` 命令可用)
+> Prerequisites: Python 3.9+, tmux, Claude Code CLI (`claude` command available)
 
-## 使用方式
+## Usage
 
-### 方式一：Web 仪表盘（推荐）
+### Option 1: Web Dashboard (Recommended)
 
-打开 `http://localhost:5016`，在 Web 界面上：
-1. 点 **+ New** 创建项目
-2. 用目录浏览器选择项目路径
-3. 输入任务描述
-4. 系统自动创建 tmux 会话、启动 Claude Code、拆步骤执行
-5. 遇到确认弹窗直接在 Web 上点击确认
+Open `http://localhost:5016` and:
+1. Click **+ New** to create a project
+2. Use the directory browser to pick a project path
+3. Enter a task description
+4. The system auto-creates a tmux session, launches Claude Code, and tracks steps
+5. Click confirm buttons directly in the browser when prompts appear
 
-### 方式二：API 调用
+### Option 2: API
 
 ```bash
-# 创建项目
+# Create a project
 curl -X POST http://localhost:5016/api/projects \
   -H 'Content-Type: application/json' \
   -d '{"name":"MyProject","path":"/path/to/project"}'
 
-# 派发任务
+# Assign a task
 curl -X POST http://localhost:5016/api/tasks \
   -H 'Content-Type: application/json' \
   -d '{"project":"MyProject","title":"Build a REST API","steps":["DB schema","API routes","Tests","Deploy"]}'
 ```
 
-### 方式三：让 AI Agent 自己管理
+### Option 3: Let Another AI Agent Manage It
 
-如果你在别的项目里用 Claude Code，可以让它同时管理 OpsPilot：
+If you're in a different project with Claude Code, you can have it manage OpsPilot via API — create projects, spawn agents, and track progress programmatically.
 
-> 用 API 调 OpsPilot 创建新项目，然后在 tmux 里启动一个 Claude Code 实例去写代码，进度回报给 OpsPilot。
-
-## 架构
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
 │                 OpsPilot :5016                    │
 │  ┌──────────┬──────────────┬─────────────────┐  │
 │  │ Projects │  Task Steps  │  Live Terminal  │  │
-│  │ 列表     │  步骤进度     │  + 确认按钮     │  │
+│  │ List     │  + Progress  │  + Controls     │  │
 │  └──────────┴──────────────┴─────────────────┘  │
-│              REST API + WebSocket                 │
+│          REST API + WebSocket                     │
 └─────────────────────┬───────────────────────────┘
                       │ tmux send-keys / capture-pane
           ┌───────────┼───────────┐
           ▼           ▼           ▼
      ┌─────────┐ ┌─────────┐ ┌─────────┐
      │ tmux    │ │ tmux    │ │ tmux    │
-     │ session │ │ session │ │ session │
+     │ Session │ │ Session │ │ Session │
      │ proj-1  │ │ proj-2  │ │ proj-3  │
      │ Claude  │ │ Claude  │ │ Claude  │
      │ Code    │ │ Code    │ │ Code    │
      └─────────┘ └─────────┘ └─────────┘
 ```
 
-## 配置
+## Features
 
-环境变量（可选）：
+- **Multi-project management** — Run multiple Claude Code agents in parallel, each in its own tmux session
+- **Task step tracking** — Auto-detect `✔` completion marks and update progress in real time
+- **Remote confirmation** — Detect Claude Code permission prompts and let you approve from the browser
+- **Live terminal view** — See agent output in real time with auto-refresh
+- **Session management** — Resume, kill, or create new Claude Code sessions per project
+- **Directory picker** — Browse and select project directories visually
+- **Claude Code session history** — List and resume previous Claude Code sessions
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `OPSPILOT_PORT` | `5016` | Web 服务端口 |
-| `OPSPILOT_PROJECTS_DIR` | `~/Documents/Projects` | 项目默认目录 |
+## API Reference
+
+See [CLAUDE.md](CLAUDE.md) for the full API table.
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPSPILOT_PORT` | `5016` | Web server port |
+| `OPSPILOT_PROJECTS_DIR` | `~/Documents/Projects` | Default projects directory |
 
 ## License
 
