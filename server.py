@@ -149,6 +149,7 @@ async def register_agent(data: dict):
         "name": name,
         "project": data.get("project", ""),
         "tmux_session": data.get("tmux_session", ""),
+        "tmux_window": data.get("tmux_window", "0"),
         "status": data.get("status", "idle"),
         "task": data.get("task", ""),
         "last_active": datetime.now().isoformat(),
