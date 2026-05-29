@@ -933,8 +933,7 @@ async function runGitPull() {
 
 // Init
 connect();
-checkForUpdates();
-setInterval(checkForUpdates, 300000); // Check every 5 min
+checkForUpdates(); // Only check on startup
 setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 8000);
 setInterval(() => {
   document.getElementById('stat-time').textContent = new Date().toLocaleTimeString('zh-CN');
