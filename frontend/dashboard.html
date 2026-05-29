@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpsPilot - Task Control Center</title>
+<style>
+  :root {
+    --bg: #f6f8fb; --bg-card: #ffffff; --bg-hover: #f0f2f6;
+    --border: #e2e6ed; --border-light: #eef0f4;
+    --text: #1a1d2e; --text-secondary: #6b7185; --text-muted: #9ba0b2;
+    --accent: #4f6ef7; --accent-light: #eef1fd;
+    --green: #22c55e; --green-bg: #e6f7ed;
+    --amber: #f59e0b; --amber-bg: #fffbeb; --amber-border: #fcd34d;
+    --red: #ef4444; --red-bg: #fde8e8;
+    --purple: #8b5cf6; --purple-bg: #f3f0ff;
+    --terminal-bg: #0d1117; --terminal-text: #c9d1d9;
+    --radius: 8px; --radius-sm: 5px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+  /* Header */
+  .header { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 20px; height: 48px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-weight: 700; font-size: 15px; letter-spacing: -0.3px; }
+  .logo span { color: var(--accent); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot.live { background: var(--green); animation: pulse 2s infinite; }
+  .dot.dead { background: var(--red); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .header-right { display: flex; align-items: center; gap: 16px; font-size: 11px; color: var(--text-secondary); }
+  .header-right strong { color: var(--text); }
+
+  /* Main 3-column layout */
+  .main { display: grid; grid-template-columns: 240px 1fr 380px; flex: 1; overflow: hidden; }
+  .col { display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
+  .col:last-child { border-right: none; }
+  .col-header { padding: 12px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); border-bottom: 1px solid var(--border-light); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; }
+  .col-body { flex: 1; overflow-y: auto; padding: 8px; }
+
+  /*── Left: Projects ──*/
+  .project-item {
+    padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer;
+    border: 1px solid transparent; margin-bottom: 4px; transition: all 0.15s;
+  }
+  .project-item:hover { background: var(--bg-hover); border-color: var(--border); }
+  .project-item.active { background: var(--accent-light); border-color: var(--accent); }
+  .project-item .pname { font-weight: 600; font-size: 12px; }
+  .project-item .pmeta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+  .project-item .ptask { font-size: 10px; color: var(--accent); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .project-item.needs-attention { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(245,158,11,0.2); animation: attentionPulse 2s infinite; }
+  @keyframes attentionPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(245,158,11,0.2); } 50% { box-shadow: 0 0 0 4px rgba(245,158,11,0.35); } }
+  .status-tag { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 8px; font-weight: 500; }
+  .tag-running { background: var(--accent-light); color: var(--accent); }
+  .tag-completed { background: var(--green-bg); color: var(--green); }
+  .tag-queued { background: #f3f4f6; color: var(--text-muted); }
+  .tag-warning { background: var(--amber-bg); color: var(--amber); }
+
+  /*── Center: Task Steps ──*/
+  .task-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+  .task-empty h3 { font-size: 16px; margin-bottom: 8px; color: var(--text-secondary); }
+  .task-empty p { font-size: 12px; line-height: 1.6; }
+  .task-header { padding: 4px 0 12px; border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
+  .task-title { font-size: 15px; font-weight: 600; }
+  .task-status-line { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .step-list { display: flex; flex-direction: column; gap: 0; }
+  .step-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 8px; position: relative; }
+  .step-item:not(:last-child)::before {
+    content: ''; position: absolute; left: 19px; top: 36px; bottom: -4px;
+    width: 2px; background: var(--border);
+  }
+  .step-item.completed:not(:last-child)::before { background: var(--green); }
+  .step-item.running:not(:last-child)::before { background: var(--accent); }
+  .step-icon {
+    width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-size: 12px; flex-shrink: 0; position: relative; z-index: 1;
+    border: 2px solid var(--border); background: var(--bg-card); color: var(--text-muted);
+  }
+  .step-item.completed .step-icon { border-color: var(--green); background: var(--green-bg); color: var(--green); }
+  .step-item.running .step-icon { border-color: var(--accent); background: var(--accent-light); color: var(--accent); animation: stepPulse 1.5s infinite; }
+  .step-item.failed .step-icon { border-color: var(--red); background: var(--red-bg); color: var(--red); }
+  @keyframes stepPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(79,110,247,0.3) } 50% { box-shadow: 0 0 0 6px rgba(79,110,247,0) } }
+  .step-info { flex: 1; min-width: 0; }
+  .step-name { font-size: 12px; font-weight: 500; }
+  .step-item.completed .step-name { color: var(--text-secondary); text-decoration: line-through; text-decoration-color: var(--green); }
+  .step-item.running .step-name { color: var(--accent); font-weight: 600; }
+  .step-duration { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+  .step-item.running .step-duration { color: var(--accent); }
+  .step-running-indicator { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 6px; animation: pulse 1.5s infinite; }
+
+  /*── Right: Terminal + Actions ──*/
+  .terminal-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .terminal-box {
+    flex: 1; background: var(--terminal-bg); color: var(--terminal-text);
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px; line-height: 1.45;
+    padding: 10px; white-space: pre-wrap; overflow-y: auto; border-radius: var(--radius-sm);
+    min-height: 150px;
+  }
+  .prompt-bar {
+    background: var(--amber-bg); border: 1px solid var(--amber-border); border-radius: var(--radius-sm);
+    padding: 10px 14px; margin-bottom: 8px; animation: flashBorder 2s ease-in-out;
+  }
+  @keyframes flashBorder { 0%,100%{border-color:var(--amber-border)} 50%{border-color:var(--amber)} }
+  .prompt-question { font-size: 11px; font-weight: 600; color: #92400e; margin-bottom: 6px; }
+  .prompt-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .prompt-btn {
+    padding: 5px 14px; border-radius: 4px; border: none; font-size: 11px; font-weight: 600;
+    font-family: inherit; cursor: pointer; transition: all 0.15s;
+  }
+  .pbtn-yes { background: var(--green); color: #fff; }
+  .pbtn-allow { background: var(--purple); color: #fff; }
+  .pbtn-no { background: var(--red); color: #fff; }
+  .pbtn-esc { background: #e5e7eb; color: var(--text-secondary); }
+  .action-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .act-btn {
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--bg-card); color: var(--text-secondary); cursor: pointer;
+    font-size: 11px; font-family: inherit; transition: all 0.15s;
+  }
+  .act-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+  .act-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .act-btn.primary:hover { background: #3d5de7; }
+  .task-input-row { display: flex; gap: 6px; margin-top: 8px; }
+  .task-input-row input {
+    flex: 1; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px;
+    font-size: 11px; font-family: inherit; background: var(--bg); color: var(--text);
+  }
+  .task-input-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: #fff; padding: 10px 18px; border-radius: var(--radius-sm); font-size: 12px; z-index: 300; animation: slideIn 0.2s ease-out; }
+  @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-left">
+    <div class="logo">⚡ <span>OpsPilot</span></div>
+    <span><span class="dot live" id="live-dot"></span> <span id="conn-text" style="font-size:11px;color:var(--text-muted);">Connecting...</span></span>
+  </div>
+  <div class="header-right">
+    <span>🖥 <strong id="stat-agents">0</strong> Agents</span>
+    <span>📁 <strong id="stat-projects">0</strong> Projects</span>
+    <span>📋 <strong id="stat-tasks">0</strong> Tasks</span>
+    <span id="stat-time">--:--:--</span>
+  </div>
+</div>
+
+<div class="main">
+  <!-- LEFT: Projects -->
+  <div class="col">
+    <div class="col-header">
+      📁 Projects
+      <button class="act-btn" style="font-size:10px;padding:3px 8px;" onclick="showNewProject()">+ New</button>
+    </div>
+    <div class="col-body" id="project-list">
+      <div style="text-align:center;padding:40px 16px;color:var(--text-muted);font-size:12px;">暂无项目</div>
+    </div>
+  </div>
+
+  <!-- CENTER: Task Steps -->
+  <div class="col">
+    <div class="col-header">
+      📋 Task Progress
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:10px;font-weight:400;color:var(--text-muted);" id="task-badge"></span>
+        <button id="btn-close-task" onclick="deselectProject()" style="display:none;background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:14px;padding:0 6px;color:var(--text-muted);line-height:20px;" title="关闭">✕</button>
+      </div>
+    </div>
+    <div class="col-body" id="task-detail">
+      <div class="task-empty">
+        <h3>选择一个项目</h3>
+        <p>在左侧项目列表中点击一个项目，<br>查看任务执行进度和步骤详情。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Terminal + Controls -->
+  <div class="col">
+    <div class="col-header">
+      🖥 Terminal & Controls
+      <span style="font-size:10px;font-weight:400;color:var(--text-muted);" id="term-label"></span>
+    </div>
+    <div class="col-body" style="display:flex;flex-direction:column;">
+      <div id="prompt-area"></div>
+      <div class="terminal-box" id="terminal">选择项目后显示终端输出...</div>
+      <div class="action-row" id="action-bar">
+        <button class="act-btn" onclick="confirmAgent('escape')">Esc</button>
+        <button class="act-btn" onclick="confirmAgent('enter')">↵ 回车</button>
+        <button class="act-btn" onclick="confirmAgent('yes')">✅ 确认(1)</button>
+        <button class="act-btn" onclick="confirmAgent('yes_allow_all')">🔓 全部允许(2)</button>
+        <button class="act-btn" onclick="refreshTerminal()">↻ 刷新终端</button>
+      </div>
+      <div class="task-input-row">
+        <input type="text" id="agent-prompt" placeholder="输入指令发送给 Claude Code..."
+               onkeydown="if(event.key==='Enter')sendPrompt()">
+        <button class="act-btn primary" onclick="sendPrompt()">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New Project Modal -->
+<div id="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:var(--bg-card);border-radius:12px;padding:24px;width:440px;box-shadow:0 20px 60px rgba(0,0,0,0.15);">
+    <h3 style="font-size:16px;margin-bottom:16px;">新建项目 + 派发任务</h3>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:11px;color:var(--text-muted);">项目名称</label>
+      <input type="text" id="new-proj-name" placeholder="例如：Odineye" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:inherit;margin-top:4px;">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:11px;color:var(--text-muted);">项目路径 <span style="color:var(--accent);cursor:pointer;float:right;" onclick="browsePath('')">📂 浏览...</span></label>
+      <div id="path-breadcrumb" style="font-size:10px;color:var(--text-muted);margin:4px 0;min-height:16px;"></div>
+      <input type="text" id="new-proj-path" placeholder="选择或输入路径..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;margin-top:2px;">
+      <div id="path-picker" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;display:none;background:var(--bg-card);"></div>
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:11px;color:var(--text-muted);">任务描述（Claude Code 会自动拆分为步骤）</label>
+      <textarea id="new-task-desc" rows="3" placeholder="例如：按照 SPEC.md 构建完整的 Odin's Eye 项目..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:inherit;margin-top:4px;resize:vertical;"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="act-btn" onclick="closeModal()">取消</button>
+      <button class="act-btn primary" onclick="createProjectAndTask()">创建项目并启动</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let ws, state = {}, selectedProject = null;
+const WS = `ws://${location.host}/ws`;
+
+function connect() {
+  ws = new WebSocket(WS);
+  ws.onopen = () => {
+    document.getElementById('conn-text').textContent = 'Connected';
+    document.getElementById('live-dot').className = 'dot live';
+  };
+  ws.onmessage = (e) => { state = JSON.parse(e.data); render(); };
+  ws.onclose = () => {
+    document.getElementById('conn-text').textContent = 'Disconnected';
+    document.getElementById('live-dot').className = 'dot dead';
+    setTimeout(connect, 3000);
+  };
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: {'Content-Type': 'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  return (await fetch(path, opts)).json();
+}
+
+// ── Render ──
+function render() {
+  const projects = state.projects || {};
+  const agents = state.agents || {};
+  const tasks = state.tasks || {};
+  const terminals = state.terminals || {};
+
+  document.getElementById('stat-agents').textContent = Object.keys(agents).length;
+  document.getElementById('stat-projects').textContent = Object.keys(projects).length;
+  document.getElementById('stat-tasks').textContent = Object.keys(tasks).length;
+
+  renderProjects(projects, agents, tasks);
+  if (selectedProject) renderTaskDetail(projects, tasks, agents, terminals);
+}
+
+function renderProjects(projects, agents, tasks) {
+  const container = document.getElementById('project-list');
+  const names = Object.keys(projects);
+  if (names.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:40px 16px;color:var(--text-muted);font-size:12px;">暂无项目</div>';
+    return;
+  }
+  // Find active task per project
+  const projectActiveTask = {};
+  Object.values(tasks).forEach(t => {
+    const pn = t.project;
+    if (!projectActiveTask[pn] || t.status === 'running') projectActiveTask[pn] = t;
+  });
+
+  // Detect which projects need attention (pending confirmation in terminal)
+  const terminals = state.terminals || {};
+  const needingAttention = new Set();
+  Object.entries(projects).forEach(([name, p]) => {
+    const projAgents = (p.agents || []).map(n => (state.agents||{})[n]).filter(Boolean);
+    const sessionName = projAgents[0]?.tmux_session || name.toLowerCase().replace(/\s+/g, '-');
+    if (detectPrompt(terminals[sessionName]?.content)) needingAttention.add(name);
+  });
+
+  container.innerHTML = names.map(name => {
+    const p = projects[name];
+    const task = projectActiveTask[name];
+    let tagClass = 'tag-queued', tagText = '待命';
+    if (task) {
+      if (task.status === 'running') { tagClass = 'tag-running'; tagText = `步骤 ${(task.current_step||0)+1}/${task.steps?.length||0}`; }
+      else if (task.status === 'completed') { tagClass = 'tag-completed'; tagText = '完成'; }
+    }
+    // Override if needs user confirmation
+    if (needingAttention.has(name)) { tagClass = 'tag-warning'; tagText = '⚠ 需确认'; }
+    const isActive = name === selectedProject;
+    return `<div class="project-item ${isActive ? 'active' : ''} ${needingAttention.has(name) && !isActive ? 'needs-attention' : ''}" onclick="selectProject('${escapeHtml(name)}')">
+      <div class="pname">📂 ${escapeHtml(name)} <span class="status-tag ${tagClass}">${tagText}</span></div>
+      <div class="ptask">${task ? escapeHtml(task.title) : '暂无任务'}</div>
+      <div class="pmeta">🤖 ${(p.agents||[]).length} agents · ${p.path ? '📁' : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTaskDetail(projects, tasks, agents, terminals) {
+  const project = projects[selectedProject];
+  if (!project) return;
+
+  // Find active task for this project
+  const projectTasks = Object.values(tasks).filter(t => t.project === selectedProject);
+  const activeTask = projectTasks.find(t => t.status === 'running') || projectTasks.sort((a,b) => b.created_at?.localeCompare(a.created_at||''))[0];
+
+  if (!activeTask) {
+    document.getElementById('task-detail').innerHTML = `
+      <div class="task-empty">
+        <h3>📋 ${escapeHtml(selectedProject)} - 暂无任务</h3>
+        <p>该项目还没有分配任务。<br>在右侧发送指令给 Claude Code，或点击"新建项目"来派发任务。</p>
+      </div>`;
+    document.getElementById('task-badge').textContent = '无任务';
+    return;
+  }
+
+  const totalSteps = activeTask.steps?.length || 0;
+  const currentStep = activeTask.current_step || 0;
+  const completedSteps = activeTask.steps?.filter(s => s.status === 'completed').length || 0;
+  const pct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+
+  document.getElementById('task-badge').textContent = `${completedSteps}/${totalSteps} · ${pct}%`;
+
+  let stepHtml = '';
+  if (activeTask.status === 'running' || activeTask.status === 'completed') {
+    stepHtml = (activeTask.steps || []).map((step, i) => {
+      let icon = '○', cls = '';
+      if (step.status === 'completed') { icon = '✓'; cls = 'completed'; }
+      else if (step.status === 'running') { icon = '◉'; cls = 'running'; }
+      else if (step.status === 'failed') { icon = '✕'; cls = 'failed'; }
+
+      let durationStr = '';
+      if (step.status === 'running' && step.started_at) {
+        const elapsed = Math.floor((Date.now() - new Date(step.started_at).getTime()) / 1000);
+        durationStr = `⏱ 运行中 · ${formatDuration(elapsed)}`;
+      } else if (step.duration_seconds > 0) {
+        durationStr = `⏱ ${formatDuration(step.duration_seconds)}`;
+      } else if (step.status === 'pending') {
+        durationStr = '等待中';
+      }
+
+      return `<div class="step-item ${cls}">
+        <div class="step-icon">${icon}</div>
+        <div class="step-info">
+          <div class="step-name">${escapeHtml(step.name)}${step.status === 'running' ? '<span class="step-running-indicator"></span>' : ''}</div>
+          <div class="step-duration">${durationStr}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } else {
+    // Task queued - show steps without animation
+    stepHtml = (activeTask.steps || []).map((step, i) => `
+      <div class="step-item">
+        <div class="step-icon">○</div>
+        <div class="step-info">
+          <div class="step-name">${escapeHtml(step.name)}</div>
+          <div class="step-duration">等待开始</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  const statusLabel = activeTask.status === 'running' ? '🔄 执行中' : activeTask.status === 'completed' ? '✅ 已完成' : '⏳ 等待中';
+
+  document.getElementById('task-detail').innerHTML = `
+    <div class="task-header">
+      <div class="task-title">${escapeHtml(activeTask.title)}</div>
+      <div class="task-status-line">
+        ${statusLabel} · ${totalSteps} 个步骤 ·
+        创建于 ${new Date(activeTask.created_at).toLocaleString('zh-CN')}
+        ${activeTask.completed_at ? ` · 完成于 ${new Date(activeTask.completed_at).toLocaleString('zh-CN')}` : ''}
+      </div>
+    </div>
+    <div class="step-list">${stepHtml}</div>
+    ${activeTask.status === 'completed' ? '<div style="text-align:center;padding:16px;color:var(--green);font-size:13px;font-weight:600;">🎉 任务全部完成！请派发新任务。</div>' : ''}
+  `;
+
+  // Terminal
+  const projAgents = (project.agents || []).map(n => agents[n]).filter(Boolean);
+  const sessionName = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  document.getElementById('term-label').textContent = sessionName;
+  const termContent = terminals[sessionName]?.content || '暂无终端数据';
+  document.getElementById('terminal').textContent = termContent;
+  document.getElementById('terminal').scrollTop = document.getElementById('terminal').scrollHeight;
+
+  // Prompt detection
+  const promptInfo = detectPrompt(termContent);
+  const promptArea = document.getElementById('prompt-area');
+  if (promptInfo) {
+    const hasAllowAll = termContent.includes('allow all edits') || termContent.includes('shift+tab');
+    promptArea.innerHTML = `<div class="prompt-bar">
+      <div class="prompt-question">⚠️ ${escapeHtml(promptInfo.question)}</div>
+      <div class="prompt-btns">
+        <button class="prompt-btn pbtn-yes" onclick="confirmAgent('yes')">✅ 确认</button>
+        ${hasAllowAll ? '<button class="prompt-btn pbtn-allow" onclick="confirmAgent(\'yes_allow_all\')">🔓 全部允许</button>' : ''}
+        <button class="prompt-btn pbtn-no" onclick="confirmAgent('no')">❌ 拒绝</button>
+        <button class="prompt-btn pbtn-esc" onclick="confirmAgent('escape')">Esc</button>
+      </div>
+    </div>`;
+  } else {
+    promptArea.innerHTML = '';
+  }
+
+}
+
+// ── Actions ──
+function selectProject(name) {
+  if (selectedProject === name) {
+    // Clicking the active project deselects it
+    deselectProject();
+    return;
+  }
+  selectedProject = name;
+  document.getElementById('btn-close-task').style.display = 'inline-block';
+  render();
+  if (ws) ws.send('ping');
+}
+
+function deselectProject() {
+  selectedProject = null;
+  document.getElementById('btn-close-task').style.display = 'none';
+  document.getElementById('task-detail').innerHTML = `
+    <div class="task-empty">
+      <h3>选择一个项目</h3>
+      <p>在左侧项目列表中点击一个项目，<br>查看任务执行进度和步骤详情。</p>
+    </div>`;
+  document.getElementById('task-badge').textContent = '';
+  document.getElementById('terminal').textContent = '选择项目后显示终端输出...';
+  document.getElementById('prompt-area').innerHTML = '';
+  renderProjects(state.projects||{}, state.agents||{}, state.tasks||{});
+}
+
+function showNewProject() {
+  document.getElementById('modal-overlay').style.display = 'flex';
+  document.getElementById('new-proj-name').focus();
+  // Default path
+  const defaultPath = '/Users/wusumac/Documents/Projects';
+  document.getElementById('new-proj-path').value = defaultPath;
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+  document.getElementById('path-picker').style.display = 'none';
+}
+
+async function browsePath(dirPath) {
+  const path = dirPath || document.getElementById('new-proj-path').value || '/Users/wusumac/Documents/Projects';
+  const r = await fetch(`/api/fs/list?path=${encodeURIComponent(path)}`);
+  const d = await r.json();
+  if (d.error) { toast('无法访问该目录'); return; }
+
+  document.getElementById('new-proj-path').value = d.path;
+
+  // Breadcrumb
+  const parts = d.path.split('/').filter(Boolean);
+  let bcHtml = '';
+  let built = '';
+  parts.forEach((p, i) => {
+    built += '/' + p;
+    const isLast = i === parts.length - 1;
+    bcHtml += isLast
+      ? `<span style="color:var(--text);">/${p}</span>`
+      : `<span style="cursor:pointer;color:var(--accent);" onclick="browsePath('${built}')">/${p}</span>`;
+  });
+  document.getElementById('path-breadcrumb').innerHTML = bcHtml || '/';
+
+  // Folder list
+  const picker = document.getElementById('path-picker');
+  picker.style.display = 'block';
+  if (d.dirs.length === 0) {
+    picker.innerHTML = '<div style="padding:8px;font-size:11px;color:var(--text-muted);text-align:center;">此目录下没有子文件夹</div>';
+  } else {
+    picker.innerHTML = d.dirs.map(dir => `
+      <div style="padding:6px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border-light);"
+           onclick="browsePath('${escapeHtml(dir.path)}')"
+           onmouseover="this.style.background='var(--bg-hover)'"
+           onmouseout="this.style.background=''">
+        📁 ${escapeHtml(dir.name)}
+      </div>
+    `).join('');
+  }
+}
+
+async function createProjectAndTask() {
+  const name = document.getElementById('new-proj-name').value.trim();
+  const path = document.getElementById('new-proj-path').value.trim();
+  const desc = document.getElementById('new-task-desc').value.trim();
+  if (!name) return;
+
+  // Auto-append project name to selected path
+  const baseDir = path || '/Users/wusumac/Documents/Projects';
+  const projectDir = baseDir.endsWith(name) ? baseDir : `${baseDir}/${name}`;
+  document.getElementById('new-proj-path').value = projectDir;
+
+  // Create project
+  await api('POST', '/api/projects', {
+    name, path: projectDir, description: desc || name,
+    kanban_status: 'in_progress', agents: [`${name.toLowerCase()}-dev`]
+  });
+
+  // Create agent
+  const sessionName = name.toLowerCase().replace(/\s+/g, '-');
+  await api('POST', '/api/agents', {
+    name: `${name.toLowerCase()}-dev`, project: name,
+    tmux_session: sessionName, tmux_window: '0',
+    status: 'starting', task: desc || 'New task'
+  });
+
+  // Create tmux session
+  await api('POST', '/api/tmux/session', {
+    name: sessionName, project_dir: projectDir,
+    prompt: desc || 'Hello'
+  });
+
+  // Create task with steps - Claude Code will auto-generate steps
+  const stepNames = desc ? extractStepsFromDescription(desc) : ['Analyze requirements', 'Design architecture', 'Implement core', 'Test', 'Deliver'];
+  await api('POST', '/api/tasks', {
+    project: name, title: desc || `Build ${name}`,
+    description: desc, steps: stepNames
+  });
+
+  // Find the task and start it
+  setTimeout(async () => {
+    const r = await fetch('/api/state'); const s = await r.json();
+    const tasks = s.tasks || {};
+    const projTasks = Object.entries(tasks).filter(([id,t]) => t.project === name);
+    if (projTasks.length > 0) {
+      await api('POST', `/api/tasks/${projTasks[0][0]}/start`);
+    }
+  }, 1000);
+
+  closeModal();
+  selectedProject = name;
+  toast(`项目 "${name}" 已创建并启动`);
+  if (ws) ws.send('ping');
+}
+
+function extractStepsFromDescription(desc) {
+  // Simple heuristic: split by numbered items or newlines
+  const lines = desc.split('\n').filter(l => l.trim());
+  if (lines.length >= 3 && lines.every(l => /^\d+[\.\)]/.test(l.trim()))) {
+    return lines.map(l => l.replace(/^\d+[\.\)]\s*/, '').trim());
+  }
+  // Default: generate reasonable steps
+  const keywords = desc.toLowerCase();
+  if (keywords.includes('build') || keywords.includes('构建')) {
+    return ['分析需求和设计架构', '搭建数据模型和存储层', '实现核心业务逻辑', '构建 API 和前端界面', '集成测试和部署'];
+  }
+  return ['需求分析', '架构设计', '核心实现', '测试验证', '交付'];
+}
+
+async function sendPrompt() {
+  const input = document.getElementById('agent-prompt');
+  const prompt = input.value.trim();
+  if (!prompt || !selectedProject) return;
+
+  const project = state.projects?.[selectedProject];
+  const agents = state.agents || {};
+  const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
+  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+
+  await api('POST', '/api/tmux/send', { session, window: '0', keys: prompt });
+  input.value = '';
+  toast('指令已发送');
+  setTimeout(refreshTerminal, 2000);
+}
+
+async function confirmAgent(action) {
+  const project = state.projects?.[selectedProject];
+  const agents = state.agents || {};
+  const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
+  const session = projAgents[0]?.tmux_session || selectedProject?.toLowerCase().replace(/\s+/g, '-') || 'odineye';
+
+  await api('POST', '/api/tmux/confirm', { session, action });
+  toast(action === 'yes' || action === 'yes_allow_all' ? '✅ 已确认' : action === 'no' ? '❌ 已拒绝' : '已操作');
+  setTimeout(refreshTerminal, 2000);
+}
+
+async function refreshTerminal() { if (ws) ws.send('ping'); }
+
+function detectPrompt(text) {
+  if (!text) return null;
+  const patterns = [
+    /Do you want to proceed\?/,
+    /Do you want to create/,
+    /Do you want to (run|execute|install|delete|remove|modify|overwrite)/,
+    /Is this a project you created/,
+    /Quick safety check/,
+  ];
+  for (const p of patterns) {
+    if (p.test(text)) {
+      const lines = text.split('\n');
+      const qIdx = lines.findIndex(l => p.test(l));
+      return { question: (lines[qIdx] || '').trim(), detected: true };
+    }
+  }
+  return null;
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s}s`;
+}
+
+function escapeHtml(t) {
+  if (!t) return '';
+  const d = document.createElement('div');
+  d.textContent = t;
+  return d.innerHTML;
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast'; el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+// Init
+connect();
+setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 8000);
+setInterval(() => {
+  document.getElementById('stat-time').textContent = new Date().toLocaleTimeString('zh-CN');
+}, 1000);
+</script>
+</body>
+</html>
