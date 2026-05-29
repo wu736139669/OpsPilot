@@ -433,6 +433,9 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
         创建于 ${new Date(activeTask.created_at).toLocaleString('zh-CN')}
         ${activeTask.completed_at ? ` · 完成于 ${new Date(activeTask.completed_at).toLocaleString('zh-CN')}` : ''}
       </div>
+      ${activeTask.description ? `<div style="margin-top:6px;padding:8px 10px;background:#f0f4ff;border-left:3px solid var(--accent);border-radius:4px;font-size:11px;color:var(--text-secondary);line-height:1.5;">
+        💬 <strong>下发指令：</strong>${escapeHtml(activeTask.description)}
+      </div>` : ''}
     </div>
     <div class="step-list">${stepHtml}</div>
     ${activeTask.status === 'completed' ? '<div style="text-align:center;padding:16px;color:var(--green);font-size:13px;font-weight:600;">🎉 任务全部完成！</div>' : ''}
