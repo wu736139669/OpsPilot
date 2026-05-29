@@ -277,7 +277,7 @@
 </div>
 
 <script>
-let ws, state = {}, selectedProject = null;
+let ws, state = {}, selectedTask = null;
 const WS = `ws://${location.host}/ws`;
 
 function connect() {
@@ -311,25 +311,20 @@ function render() {
   document.getElementById('stat-projects').textContent = Object.keys(projects).length;
   document.getElementById('stat-tasks').textContent = Object.keys(tasks).length;
 
-  renderProjects(projects, agents, tasks);
-  if (selectedProject) renderTaskDetail(projects, tasks, agents, terminals);
+  renderTaskList(projects, agents, tasks);
+  if (selectedTask) renderTaskDetail(projects, tasks, agents, terminals);
 }
 
-function renderProjects(projects, agents, tasks) {
+function renderTaskList(projects, agents, tasks) {
   const container = document.getElementById('project-list');
-  const names = Object.keys(projects);
-  if (names.length === 0) {
-    container.innerHTML = '<div style="text-align:center;padding:40px 16px;color:var(--text-muted);font-size:12px;">暂无项目</div>';
+  const taskList = Object.values(tasks).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+
+  if (taskList.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:40px 16px;color:var(--text-muted);font-size:12px;">No tasks yet</div>';
     return;
   }
-  // Find active task per project
-  const projectActiveTask = {};
-  Object.values(tasks).forEach(t => {
-    const pn = t.project;
-    if (!projectActiveTask[pn] || t.status === 'running') projectActiveTask[pn] = t;
-  });
 
-  // Detect which projects need attention (pending confirmation in terminal)
+  // Detect which projects need attention
   const terminals = state.terminals || {};
   const needingAttention = new Set();
   Object.entries(projects).forEach(([name, p]) => {
@@ -338,47 +333,38 @@ function renderProjects(projects, agents, tasks) {
     if (detectPrompt(terminals[sessionName]?.content)) needingAttention.add(name);
   });
 
-  container.innerHTML = names.map(name => {
-    const p = projects[name];
-    const task = projectActiveTask[name];
-    let tagClass = 'tag-queued', tagText = '待命';
-    if (task) {
-      if (task.status === 'running') { tagClass = 'tag-running'; tagText = `步骤 ${(task.current_step||0)+1}/${task.steps?.length||0}`; }
-      else if (task.status === 'completed') { tagClass = 'tag-completed'; tagText = '完成'; }
-    }
-    // Override if needs user confirmation
-    if (needingAttention.has(name)) { tagClass = 'tag-warning'; tagText = '⚠ 需确认'; }
-    const isActive = name === selectedProject;
-    // Session status indicator
+  container.innerHTML = taskList.map(task => {
+    const p = projects[task.project] || {};
+    const totalSteps = task.steps?.length || 0;
+    const completedSteps = task.steps?.filter(s => s.status === 'completed').length || 0;
+
+    let tagClass = 'tag-queued', tagText = 'Queued';
+    if (task.status === 'running') { tagClass = 'tag-running'; tagText = `${completedSteps}/${totalSteps}`; }
+    else if (task.status === 'completed') { tagClass = 'tag-completed'; tagText = 'Done'; }
+    if (needingAttention.has(task.project)) { tagClass = 'tag-warning'; tagText = '⚠ Confirm'; }
+
+    const isActive = task.id === selectedTask;
+    // Session status (per project)
     const projAgents2 = (p.agents || []).map(n => (state.agents||{})[n]).filter(Boolean);
     const tmuxRunning = projAgents2.some(a => a.tmux?.running);
-    const sessionDot = tmuxRunning ? '<span style="color:#3fb950;" title="tmux 在线">●</span>' : '<span style="color:#f85149;" title="tmux 离线">●</span>';
+    const sessionDot = tmuxRunning ? '<span style="color:#3fb950;" title="tmux online">●</span>' : '<span style="color:#f85149;" title="tmux offline">●</span>';
+    const isRunningNow = task.status === 'running';
+    const statusDot = isRunningNow ? '<span class="step-running-indicator" style="margin-left:0;margin-right:4px;"></span>' : '';
 
-    return `<div class="project-item ${isActive ? 'active' : ''} ${needingAttention.has(name) && !isActive ? 'needs-attention' : ''}" onclick="selectProject('${escapeHtml(name)}')">
-      <div class="pname">${sessionDot} ${escapeHtml(name)} <span class="status-tag ${tagClass}">${tagText}</span></div>
-      <div class="ptask">${task ? escapeHtml(task.title) : '暂无任务'}</div>
-      <div class="pmeta">🤖 ${(p.agents||[]).length} agents · ${p.path ? '📁' : ''}</div>
+    return `<div class="project-item ${isActive ? 'active' : ''} ${needingAttention.has(task.project) && !isActive ? 'needs-attention' : ''}" onclick="selectTask('${task.id}')">
+      <div class="pname">${sessionDot} ${statusDot}${escapeHtml(task.title.substring(0, 40))}${task.title.length>40?'...':''} <span class="status-tag ${tagClass}">${tagText}</span></div>
+      <div class="ptask">📂 ${escapeHtml(task.project)} · ${completedSteps}/${totalSteps} steps</div>
+      <div class="pmeta">🕐 ${task.created_at ? new Date(task.created_at).toLocaleString('zh-CN') : ''} ${task.completed_at ? '· ✅ ' + new Date(task.completed_at).toLocaleString('zh-CN') : ''}</div>
     </div>`;
   }).join('');
 }
 
 function renderTaskDetail(projects, tasks, agents, terminals) {
-  const project = projects[selectedProject];
-  if (!project) return;
+  const activeTask = tasks[selectedTask];
+  if (!activeTask) return;
 
-  // Find active task for this project
-  const projectTasks = Object.values(tasks).filter(t => t.project === selectedProject);
-  const activeTask = projectTasks.find(t => t.status === 'running') || projectTasks.sort((a,b) => b.created_at?.localeCompare(a.created_at||''))[0];
-
-  if (!activeTask) {
-    document.getElementById('task-detail').innerHTML = `
-      <div class="task-empty">
-        <h3>📋 ${escapeHtml(selectedProject)} - 暂无任务</h3>
-        <p>该项目还没有分配任务。<br>在右侧发送指令给 Claude Code，或点击"新建项目"来派发任务。</p>
-      </div>`;
-    document.getElementById('task-badge').textContent = '无任务';
-    return;
-  }
+  const project = projects[activeTask.project] || {};
+  const projectName = activeTask.project;
 
   const totalSteps = activeTask.steps?.length || 0;
   const currentStep = activeTask.current_step || 0;
@@ -446,7 +432,7 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
 
   // Terminal + session info (declare before use)
   const projAgents = (project.agents || []).map(n => agents[n]).filter(Boolean);
-  const sessionName = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const sessionName = projAgents[0]?.tmux_session || selectedTask.toLowerCase().replace(/\s+/g, '-');
   document.getElementById('term-label').textContent = sessionName;
   const termContent = terminals[sessionName]?.content || 'No terminal data';
   document.getElementById('terminal').textContent = termContent;
@@ -497,31 +483,36 @@ function renderTaskDetail(projects, tasks, agents, terminals) {
 }
 
 // ── Actions ──
-function selectProject(name) {
-  if (selectedProject === name) {
-    // Clicking the active project deselects it
-    deselectProject();
+function selectTask(taskId) {
+  if (selectedTask === taskId) {
+    deselectTask();
     return;
   }
-  selectedProject = name;
+  selectedTask = taskId;
   document.getElementById('btn-close-task').style.display = 'inline-block';
   render();
   if (ws) ws.send('ping');
 }
 
-function deselectProject() {
-  selectedProject = null;
+function deselectTask() {
+  selectedTask = null;
   document.getElementById('btn-close-task').style.display = 'none';
   document.getElementById('task-detail').innerHTML = `
     <div class="task-empty">
-      <h3>选择一个项目</h3>
-      <p>在左侧项目列表中点击一个项目，<br>查看任务执行进度和步骤详情。</p>
+      <h3>Select a task</h3>
+      <p>Click a task in the list to view<br>its progress and step details.</p>
     </div>`;
   document.getElementById('task-badge').textContent = '';
-  document.getElementById('terminal').textContent = '选择项目后显示终端输出...';
+  document.getElementById('terminal').textContent = 'Select a task to view terminal...';
   document.getElementById('prompt-area').innerHTML = '';
   document.getElementById('confirm-btns').style.display = 'none';
-  renderProjects(state.projects||{}, state.agents||{}, state.tasks||{});
+  renderTaskList(state.projects||{}, state.agents||{}, state.tasks||{});
+}
+
+function getSelectedProjectName() {
+  if (!selectedTask) return '';
+  const task = state.tasks?.[selectedTask];
+  return task?.project || '';
 }
 
 function showNewProject() {
@@ -631,26 +622,25 @@ async function createProjectAndTask() {
     prompt: desc || 'Hello'
   });
 
-  // Create task with steps - Claude Code will auto-generate steps
+  // Create task
   const stepNames = desc ? extractStepsFromDescription(desc) : ['Analyze requirements', 'Design architecture', 'Implement core', 'Test', 'Deliver'];
-  await api('POST', '/api/tasks', {
+  const taskResp = await api('POST', '/api/tasks', {
     project: name, title: desc || `Build ${name}`,
     description: desc, steps: stepNames
   });
+  const taskId = taskResp.task?.id;
 
-  // Find the task and start it
-  setTimeout(async () => {
-    const r = await fetch('/api/state'); const s = await r.json();
-    const tasks = s.tasks || {};
-    const projTasks = Object.entries(tasks).filter(([id,t]) => t.project === name);
-    if (projTasks.length > 0) {
-      await api('POST', `/api/tasks/${projTasks[0][0]}/start`);
-    }
-  }, 1000);
+  // Start the task and select it
+  if (taskId) {
+    setTimeout(async () => {
+      await api('POST', `/api/tasks/${taskId}/start`);
+      if (ws) ws.send('ping');
+    }, 1000);
+  }
 
   closeModal();
-  selectedProject = name;
-  toast(`项目 "${name}" 已创建并启动`);
+  selectedTask = taskId || '';
+  toast('Project "' + name + '" created');
   if (ws) ws.send('ping');
 }
 
@@ -671,27 +661,29 @@ function extractStepsFromDescription(desc) {
 async function sendPrompt() {
   const input = document.getElementById('agent-prompt');
   const prompt = input.value.trim();
-  if (!prompt || !selectedProject) return;
+  if (!prompt || !selectedTask) return;
 
-  const project = state.projects?.[selectedProject];
+  const projectName = getSelectedProjectName();
+  const project = state.projects?.[projectName];
   const agents = state.agents || {};
   const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
-  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const session = projAgents[0]?.tmux_session || projectName.toLowerCase().replace(/\s+/g, '-');
 
   await api('POST', '/api/tmux/send', { session, window: '0', keys: prompt });
   input.value = '';
-  toast('指令已发送');
+  toast('Command sent');
   setTimeout(refreshTerminal, 2000);
 }
 
 async function confirmAgent(action) {
-  const project = state.projects?.[selectedProject];
+  const projectName = getSelectedProjectName();
+  const project = state.projects?.[projectName];
   const agents = state.agents || {};
   const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
-  const session = projAgents[0]?.tmux_session || selectedProject?.toLowerCase().replace(/\s+/g, '-') || 'odineye';
+  const session = projAgents[0]?.tmux_session || projectName.toLowerCase().replace(/\s+/g, '-') || 'odineye';
 
   await api('POST', '/api/tmux/confirm', { session, action });
-  toast(action === 'yes' || action === 'yes_allow_all' ? '✅ 已确认' : action === 'no' ? '❌ 已拒绝' : '已操作');
+  toast(action === 'yes' || action === 'yes_allow_all' ? 'Confirmed' : action === 'no' ? 'Denied' : 'Done');
   setTimeout(refreshTerminal, 2000);
 }
 
@@ -740,8 +732,8 @@ function toast(msg) {
 // ── Session & Task management ──
 
 function showNewTaskModal() {
-  if (!selectedProject) return;
-  document.getElementById('task-modal-title').textContent = '派发新任务 → ' + selectedProject;
+  if (!selectedTask) return;
+  document.getElementById('task-modal-title').textContent = 'New Task → ' + getSelectedProjectName();
   document.getElementById('task-modal-overlay').style.display = 'flex';
   document.getElementById('new-task-desc-input').focus();
 }
@@ -752,15 +744,16 @@ function closeTaskModal() {
 
 async function submitNewTask() {
   const desc = document.getElementById('new-task-desc-input').value.trim();
-  if (!desc || !selectedProject) return;
+  if (!desc || !selectedTask) return;
+  const projectName = getSelectedProjectName();
 
-  const project = state.projects?.[selectedProject];
+  const project = state.projects?.[projectName];
   const agents = state.agents || {};
   const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
-  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const session = projAgents[0]?.tmux_session || projectName.toLowerCase().replace(/\s+/g, '-');
 
   const stepNames = extractStepsFromDescription(desc);
-  const r = await api('POST', '/api/tasks', { project: selectedProject, title: desc, description: desc, steps: stepNames });
+  const r = await api('POST', '/api/tasks', { project: projectName, title: desc, description: desc, steps: stepNames });
   const taskId = r.task?.id;
 
   await api('POST', '/api/tmux/send', { session, window: '0', keys: desc });
@@ -768,41 +761,38 @@ async function submitNewTask() {
     await api('POST', `/api/agents/${projAgents[0].name}/status`, { status: 'running', task: desc });
   }
   if (taskId) {
-    setTimeout(async () => { await api('POST', `/api/tasks/${taskId}/start`); if (ws) ws.send('ping'); }, 1000);
+    setTimeout(async () => { await api('POST', `/api/tasks/${taskId}/start`); selectedTask = taskId; if (ws) ws.send('ping'); }, 1000);
   }
 
   closeTaskModal();
   document.getElementById('new-task-desc-input').value = '';
-  toast(`新任务已派发给 ${selectedProject}`);
+  toast('New task assigned to ' + projectName);
   if (ws) ws.send('ping');
 }
 
 async function resumeSession() {
-  if (!selectedProject) return;
-  const project = state.projects?.[selectedProject];
+  if (!selectedTask) return;
+  const projectName = getSelectedProjectName();
+  const project = state.projects?.[projectName];
   const agents = state.agents || {};
   const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
-  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const session = projAgents[0]?.tmux_session || projectName.toLowerCase().replace(/\s+/g, '-');
   const path = project?.path || '';
   const resumeId = document.getElementById('resume-session-id')?.value?.trim() || '';
 
-  // Fetch available sessions and show picker
   const r = await fetch(`/api/claude/sessions?project_dir=${encodeURIComponent(path)}`);
   const data = await r.json();
   const sessions = data.sessions || [];
 
   if (resumeId) {
-    // Specific ID provided
-    const resp = await api('POST', '/api/tmux/resume', { session, project_dir: path, resume_id: resumeId });
-    toast(`已恢复会话 ${resumeId}`);
+    await api('POST', '/api/tmux/resume', { session, project_dir: path, resume_id: resumeId });
+    toast('Session resumed: ' + resumeId);
     setTimeout(refreshTerminal, 2000);
   } else if (sessions.length > 0) {
-    // Show session picker in the terminal bar
     showSessionPicker(sessions, session, path);
   } else {
-    // No sessions, just start fresh
-    const resp = await api('POST', '/api/tmux/resume', { session, project_dir: path, resume_id: '' });
-    toast('无历史会话，启动新 Claude Code');
+    await api('POST', '/api/tmux/resume', { session, project_dir: path, resume_id: '' });
+    toast('No history, starting fresh Claude');
     setTimeout(refreshTerminal, 2000);
   }
   if (ws) ws.send('ping');
@@ -831,11 +821,11 @@ function showSessionPicker(sessions, sessionName, projectPath) {
 }
 
 async function selectSession(sessionId) {
-  if (!selectedProject) return;
-  const project = state.projects?.[selectedProject];
+  if (!selectedTask) return;
+  const project = state.projects?.[getSelectedProjectName()];
   const agents = state.agents || {};
   const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
-  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const session = projAgents[0]?.tmux_session || selectedTask.toLowerCase().replace(/\s+/g, '-');
   const path = project?.path || '';
 
   document.getElementById('prompt-area').innerHTML = '';
@@ -849,13 +839,13 @@ async function selectSession(sessionId) {
 }
 
 async function killSession() {
-  if (!selectedProject) return;
+  if (!selectedTask) return;
   if (!confirm('确定要关闭此项目的 tmux 会话吗？任务进度会保留。')) return;
 
-  const project = state.projects?.[selectedProject];
+  const project = state.projects?.[getSelectedProjectName()];
   const agents = state.agents || {};
   const projAgents = (project?.agents || []).map(n => agents[n]).filter(Boolean);
-  const session = projAgents[0]?.tmux_session || selectedProject.toLowerCase().replace(/\s+/g, '-');
+  const session = projAgents[0]?.tmux_session || selectedTask.toLowerCase().replace(/\s+/g, '-');
 
   await api('POST', '/api/tmux/kill', { session });
   toast(`会话 ${session} 已关闭`);
